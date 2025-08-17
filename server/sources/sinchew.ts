@@ -1,7 +1,6 @@
 // /server/sources/sinchew.ts
 import type { NewsItem } from "@shared/types"
 
-// --- minimal JSON types for this endpoint ---
 interface HotListItem {
   ID: number | string
   the_permalink?: string
@@ -16,15 +15,23 @@ interface HotListItem {
   date_diff?: string
 }
 interface HotListResponse {
-  cat?: string
   result?: HotListItem[]
+}
+
+type CFInit = RequestInit & {
+  cf?: { cacheTtl?: number, cacheEverything?: boolean }
 }
 
 const BASE = "https://www.sinchew.com.my"
 
-// pick title and url from various possible fields
+// Detect Cloudflare Workers/Pages runtime (very lightweight heuristic)
+const isWorkers
+  = typeof (globalThis as any).WebSocketPair === "function"
+    && typeof (globalThis as any).caches !== "undefined"
+
 function pickTitle(it: HotListItem): string {
-  if (typeof it.title === "object") return (it.title?.rendered ?? "").toString().trim()
+  if (typeof it.title === "object")
+    return (it.title?.rendered ?? "").toString().trim()
   return (it.post_title ?? (it.title as string) ?? "").toString().trim()
 }
 function pickUrl(it: HotListItem): string | null {
@@ -33,58 +40,123 @@ function pickUrl(it: HotListItem): string | null {
   return href.startsWith("http") ? href : new URL(href, BASE).toString()
 }
 
-async function fetchHot(page: number): Promise<HotListItem[]> {
+async function fetchHotJSON(page: number, range: "6H" | "1D" | "1W") {
   const url = new URL("/hot-post-list/", BASE)
   url.search = new URLSearchParams({
     taxid: "-1",
     page: String(page),
-    range: "1D",
+    range,
     umcl: "Y",
+    _: String(Date.now()), // mimic XHR cache-buster
   }).toString()
 
-  const raw: any = await myFetch(url.toString(), {
+  const init: CFInit = {
     headers: {
       "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
       "Accept": "application/json, text/javascript, */*; q=0.01",
       "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
       "X-Requested-With": "XMLHttpRequest",
       "Referer": `${BASE}/hot-posts/`,
     },
-  })
+    redirect: "follow",
+    method: "GET",
+  }
+  if (isWorkers) {
+    init.cf = { cacheTtl: 120, cacheEverything: true }
+  }
+  const raw: any = await myFetch(url.toString(), init)
 
   const data: HotListResponse = typeof raw === "string" ? JSON.parse(raw) : raw
-  return Array.isArray(data?.result) ? data.result : []
+  const list = Array.isArray(data?.result) ? data.result! : []
+  return { list, ok: list.length > 0 }
 }
 
-// --- single-call 6H hot list (page=3) ---
-const hotnews = defineSource(async () => {
-  const page = 3
+// Fallback: WP REST (latest posts). Not “hot”, but gives basic values in prod.
+interface WPPost {
+  id: number
+  link: string
+  title: { rendered: string }
+  excerpt?: { rendered?: string }
+  date?: string
+}
+async function fetchWPBasics(): Promise<NewsItem[]> {
+  const url = `${BASE}/wp-json/wp/v2/posts?per_page=10&_fields=id,link,title,excerpt,date`
+  const wpInit: CFInit = {
+    headers: {
+      "Accept": "application/json",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+      "Referer": `${BASE}/`,
+    },
+    redirect: "follow",
+    method: "GET",
+  }
+  if (isWorkers) {
+    wpInit.cf = { cacheTtl: 300, cacheEverything: true }
+  }
+  const raw: any = await myFetch(url, wpInit)
 
-  let list = await fetchHot(page)
-  if (list.length === 0 && page !== 1) {
-    // some pages can be empty — try page 1 as a basic fallback
-    list = await fetchHot(1)
+  const posts: WPPost[] = typeof raw === "string" ? JSON.parse(raw) : raw
+  const seen = new Set<string>()
+  const news: NewsItem[] = []
+  for (const p of posts || []) {
+    if (!p?.link || !p?.title?.rendered) continue
+    if (seen.has(p.link)) continue
+    seen.add(p.link)
+    news.push({
+      id: p.id,
+      title: p.title.rendered.replace(/<[^>]+>/g, "").trim(),
+      url: p.link,
+      pubDate: p.date,
+      extra: {
+        hover:
+          p.excerpt?.rendered
+            ?.replace(/<[^>]+>/g, "")
+            .replace(/\s+/g, " ")
+            .trim() || undefined,
+        info: false,
+      },
+    })
+  }
+  return news
+}
+
+const hotnews = defineSource(async () => {
+  // your current plan: 1D, page=3
+  const page = 3 as const
+  const { list, ok } = await fetchHotJSON(page, "1D").catch(() => ({
+    list: [],
+    ok: false,
+  }))
+
+  // If Cloudflare deploy returns 403/empty, gracefully fall back to WP REST
+  if (!ok && isWorkers) {
+    const fallback = await fetchWPBasics()
+    if (fallback.length) return fallback
   }
 
+  // Map basic values
   const news: NewsItem[] = []
   for (const it of list) {
     const url = pickUrl(it)
     const title = pickTitle(it)
     if (!url || !title) continue
-
     news.push({
       id: it.ID ?? url,
       title,
       url,
-      pubDate: it.time, // raw string from API
+      pubDate: it.time,
       extra: {
-        info: it.date_diff || undefined, // e.g. "2小时前"
-        hover: (it.post_excerpt ?? it.excerpt ?? "").toString().trim() || undefined,
+        info: it.date_diff || undefined, // e.g., "2小时前"
+        hover:
+          (it.post_excerpt ?? it.excerpt ?? "")
+            .toString()
+            .replace(/<[^>]+>/g, "")
+            .replace(/\s+/g, " ")
+            .trim() || undefined,
       },
     })
   }
-
   return news
 })
 
