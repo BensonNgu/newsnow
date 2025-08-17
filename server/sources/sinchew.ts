@@ -58,7 +58,7 @@ async function fetchHot(page: number): Promise<HotListItem[]> {
 
 // --- single-call 6H hot list (page=3) ---
 const hotnews = defineSource(async () => {
-  const page = 8
+  const page = 3
 
   let list = await fetchHot(page)
   if (list.length === 0 && page !== 1) {
