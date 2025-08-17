@@ -44,11 +44,12 @@ async function fetchHot(page: number): Promise<HotListItem[]> {
 
   const raw: any = await myFetch(url.toString(), {
     headers: {
-      "User-Agent": "newsnow-bot/1.0",
-      "Accept": "application/json, text/plain, */*",
+      "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+      "Accept": "application/json, text/javascript, */*; q=0.01",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
       "X-Requested-With": "XMLHttpRequest",
       "Referer": `${BASE}/hot-posts/`,
-      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     },
   })
 
