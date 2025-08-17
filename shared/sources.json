@@ -472,5 +472,14 @@
     "color": "green",
     "interval": 1800000,
     "title": "最热"
+  },
+  "sinchew": {
+    "title": "热门新闻",
+    "name": "星洲日报",
+    "type": "hottest",
+    "column": "world",
+    "home": "https://www.sinchew.com.my/",
+    "color": "red",
+    "interval": 600000
   }
 }

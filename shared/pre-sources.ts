@@ -413,6 +413,14 @@ export const originSources = {
       },
     },
   },
+  "sinchew": {
+    name: "星洲日报",
+    column: "world",
+    color: "red",
+    type: "hottest",
+    title: "热门新闻",
+    home: "https://www.sinchew.com.my/",
+  },
 } as const satisfies Record<string, OriginSource>
 
 export function genSources() {

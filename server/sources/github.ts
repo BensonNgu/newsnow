@@ -6,6 +6,7 @@ const trending = defineSource(async () => {
   const html: any = await myFetch("https://github.com/trending?spoken_language_code=")
   const $ = cheerio.load(html)
   const $main = $("main .Box div[data-hpc] > article")
+  // const $main = $("div#cat-post-list-6H > div.horizontal-post-frame")
   const news: NewsItem[] = []
   $main.each((_, el) => {
     const a = $(el).find(">h2 a")
